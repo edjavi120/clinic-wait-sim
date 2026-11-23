@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clinic Wait-Time Simulator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⏱️</text></svg>">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f5f1;
+    --surface-1: #fcfcfb;
+    --border: #e2e0d8;
+    --grid: #ebe9e2;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --series-1: #2a78d6;      /* the model */
+    --series-1-soft: #cde2fb;
+    --series-2: #eb6834;      /* you / highlighted mistake */
+    --dot: #9a9890;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #121211; --surface-1: #1a1a19; --border: #2e2d2a; --grid: #262523;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --series-1: #3987e5; --series-1-soft: #1c3a5e; --series-2: #d95926; --dot: #6b6a64;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121211; --surface-1: #1a1a19; --border: #2e2d2a; --grid: #262523;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --series-1-soft: #1c3a5e; --series-2: #d95926; --dot: #6b6a64;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text-primary);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1060px; margin: 0 auto; padding: 32px 20px 120px; }
+  header.hero { padding: 24px 0 8px; }
+  .eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--series-1); font-weight: 600; }
+  h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.1; margin: 6px 0 12px; }
+  h2 { font-size: 24px; margin: 0 0 6px; }
+  h3 { font-size: 16px; margin: 0 0 8px; }
+  p.lead { font-size: 18px; color: var(--text-secondary); max-width: 720px; margin: 0; }
+  section { margin-top: 40px; }
+  .sub { color: var(--text-secondary); margin: 0 0 18px; max-width: 760px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+
+  /* sliders */
+  .control { margin-bottom: 18px; }
+  .control label { display: flex; justify-content: space-between; font-weight: 600; font-size: 15px; }
+  .control label span.val { font-variant-numeric: tabular-nums; color: var(--series-1); }
+  .control small { color: var(--text-muted); display: block; font-size: 13px; }
+  input[type=range] { width: 100%; accent-color: var(--series-1); margin: 6px 0 0; }
+
+  /* readout */
+  .readout { text-align: center; padding: 8px 0 4px; }
+  .readout .big { font-size: 64px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .readout .unit { font-size: 22px; color: var(--text-secondary); font-weight: 500; }
+  .readout .range { color: var(--text-secondary); margin-top: 6px; }
+  .clinic { margin: 18px 0 6px; padding: 14px; border-radius: 10px; background: var(--bg); border: 1px dashed var(--border); }
+  .clinic .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 30px; }
+  .clinic .row + .row { margin-top: 10px; }
+  .clinic .lbl { font-size: 12px; color: var(--text-muted); width: 78px; flex: none; }
+  .doc { width: 30px; height: 30px; border-radius: 8px; background: var(--series-1); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+  .pt { width: 14px; height: 14px; border-radius: 50%; background: var(--dot); }
+  .pt.you { background: var(--series-2); width: 18px; height: 18px; box-shadow: 0 0 0 2px var(--surface-1); }
+  .youtag { font-size: 12px; color: var(--text-secondary); margin-left: 2px; }
+
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); padding: 9px 14px; }
+  button.primary { background: var(--series-1); border-color: var(--series-1); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .55; cursor: default; }
+  .btnrow { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+
+  /* charts */
+  svg text { fill: var(--text-secondary); font-size: 12px; }
+  svg .axis line, svg .axis path { stroke: var(--border); }
+  svg .gridline { stroke: var(--grid); }
+  .chart { width: 100%; height: auto; display: block; }
+  .tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 9px; font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,.12); display: none; z-index: 50; white-space: nowrap; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .callout { border-left: 3px solid var(--series-1); padding: 4px 0 4px 12px; color: var(--text-secondary); margin-top: 12px; }
+
+  /* metrics */
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+  @media (max-width: 640px) { .metrics { grid-template-columns: 1fr; } }
+  .metric .name { font-size: 13px; color: var(--text-muted); }
+  .metric .num { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .num small { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+  .metric.win { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-muted); font-weight: 600; }
+  details summary { cursor: pointer; color: var(--text-secondary); margin-top: 10px; }
+  .guide { white-space: pre-wrap; font-size: 14px; color: var(--text-secondary); background: var(--bg); border-radius: 10px; padding: 14px; border: 1px solid var(--border); }
+
+  /* chat */
+  #chatFab { position: fixed; right: 20px; bottom: 20px; z-index: 40; border-radius: 999px; padding: 12px 18px; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+  #chatPanel { position: fixed; right: 20px; bottom: 80px; width: min(380px, calc(100vw - 40px)); height: min(560px, calc(100vh - 120px));
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.2);
+    display: none; flex-direction: column; z-index: 40; overflow: hidden; }
+  #chatPanel.open { display: flex; }
+  .chat-head { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .chat-head b { font-size: 15px; }
+  .chat-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 8px 11px; border-radius: 12px; max-width: 88%; font-size: 14px; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: var(--series-1); color: #fff; }
+  .msg.bot { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); }
+  .msg.sys { align-self: center; color: var(--text-muted); font-size: 13px; text-align: center; background: none; }
+  .chat-foot { border-top: 1px solid var(--border); padding: 10px; display: flex; gap: 8px; }
+  .chat-foot input { flex: 1; font: inherit; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text-primary); }
+  .enable { padding: 14px; font-size: 14px; color: var(--text-secondary); }
+  .enable select { font: inherit; width: 100%; margin: 8px 0 10px; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text-primary); }
+  progress { width: 100%; height: 8px; accent-color: var(--series-1); }
+  .suggest { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .suggest button { text-align: left; font-size: 13px; padding: 7px 10px; }
+  footer { margin-top: 56px; color: var(--text-muted); font-size: 14px; border-top: 1px solid var(--border); padding-top: 18px; }
+  footer a { color: var(--series-1); }
+  .themebtn { position: absolute; top: 16px; right: 20px; font-size: 13px; padding: 6px 10px; }
+</style>
+</head>
+<body>
+<button class="themebtn" id="themeBtn" aria-label="Toggle light/dark theme">◐ Theme</button>
+<main>
+  <header class="hero">
+    <div class="eyebrow">Interactive health data exhibit</div>
+    <h1>How long will you wait at the clinic?</h1>
+    <p class="lead">Nobody likes waiting in line. A small neural network learned how wait time depends on staffing and the queue
+      from 8,000 simulated walk-in clinic visits. Change the clinic below and see what it predicts.</p>
+  </header>
+
+  <!-- ============ 1. SIMULATOR ============ -->
+  <section id="sim">
+    <h2>1 · Set up the clinic</h2>
+    <p class="sub">You just walked in with a non-urgent problem. Urgent patients who arrive after you get seen first.</p>
+    <div class="grid2">
+      <div class="card">
+        <div class="control">
+          <label for="doctors">Doctors on shift <span class="val" id="v_doctors"></span></label>
+          <input type="range" id="doctors" min="1" max="6" step="1" value="2">
+        </div>
+        <div class="control">
+          <label for="queue_ahead">Patients waiting ahead of you <span class="val" id="v_queue_ahead"></span></label>
+          <input type="range" id="queue_ahead" min="0" max="15" step="1" value="6">
+        </div>
+        <div class="control">
+          <label for="visit_minutes">Average visit length <span class="val" id="v_visit_minutes"></span></label>
+          <input type="range" id="visit_minutes" min="5" max="25" step="1" value="15">
+          <small>How long each patient spends with a doctor, on average.</small>
+        </div>
+        <div class="control">
+          <label for="walkins_per_hour">New walk-ins per hour <span class="val" id="v_walkins_per_hour"></span></label>
+          <input type="range" id="walkins_per_hour" min="2" max="15" step="1" value="8">
+          <small>About 1 in 10 is urgent and goes ahead of you.</small>
+        </div>
+      </div>
+      <div class="card">
+        <div class="readout" aria-live="polite">
+          <div style="color:var(--text-muted);font-size:14px">The network predicts you'll wait</div>
+          <div><span class="big" id="predBig">–</span> <span class="unit" id="predUnit">min</span></div>
+          <div class="range" id="predRange"></div>
+        </div>
+        <div class="clinic" aria-hidden="true">
+          <div class="row"><span class="lbl">Doctors</span><span id="docRow" class="row" style="margin:0"></span></div>
+          <div class="row"><span class="lbl">Waiting room</span><span id="queueRow" class="row" style="margin:0"></span></div>
+        </div>
+        <div class="btnrow">
+          <button class="primary" id="runSim">Run the real simulator 300 times</button>
+        </div>
+        <div id="simOut" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. DISCOVERY ============ -->
+  <section id="discovery">
+    <h2>2 · Would one more doctor help?</h2>
+    <p class="sub">The model's predicted wait at your current settings, for every possible staffing level. Your current setting is highlighted.</p>
+    <div class="card">
+      <svg id="docChart" class="chart" viewBox="0 0 900 300" role="img" aria-label="Predicted wait by number of doctors"></svg>
+      <div class="callout" id="docCallout"></div>
+    </div>
+  </section>
+
+  <!-- ============ 3. TEST RESULTS ============ -->
+  <section id="results">
+    <h2>3 · How good is the model?</h2>
+    <p class="sub" id="resultsSub"></p>
+    <div class="metrics" id="metrics"></div>
+    <div class="grid2">
+      <div class="card">
+        <h3>Predicted vs. actual wait (test set)</h3>
+        <svg id="scatter" class="chart" viewBox="0 0 460 420" role="img" aria-label="Scatter of predicted versus actual wait on the test set"></svg>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>Test patient</span><span><i style="background:var(--series-2)"></i>Biggest mistake</span><span><i style="background:var(--text-muted);height:2px;vertical-align:4px"></i>Perfect prediction</span></div>
+      </div>
+      <div class="card" id="mistakeCard">
+        <h3>The model's biggest mistake</h3>
+        <div id="mistakeText"></div>
+        <svg id="mistakeChart" class="chart" viewBox="0 0 460 200" role="img" aria-label="Distribution of 500 simulator reruns for the mistake case"></svg>
+        <div class="legend"><span><i style="background:var(--series-1-soft)"></i>500 reruns of the same clinic</span><span><i style="background:var(--series-1)"></i>Model prediction</span><span><i style="background:var(--series-2)"></i>What actually happened</span></div>
+      </div>
+    </div>
+    <details><summary>Show results as a table</summary>
+      <table id="resTable" style="margin-top:8px"></table>
+    </details>
+  </section>
+
+  <!-- ============ 4. GUIDE ============ -->
+  <section id="about">
+    <h2>4 · About this exhibit</h2>
+    <p class="sub">This is the site guide. The chatbot (bottom right) reads exactly this text and nothing else.</p>
+    <div class="guide" id="guideText"></div>
+  </section>
+
+  <footer>
+    Data: <b>synthetic</b>, generated by a discrete-event clinic queue simulation written for this exhibit (<code>train_model.py</code>). No real patient data.
+    Model: scikit-learn MLPRegressor, exported to JSON and run in your browser. Chat: <a href="https://github.com/mlc-ai/web-llm" target="_blank" rel="noopener">WebLLM</a>.
+    · <a id="srcLink" href="#" target="_blank" rel="noopener">Source code &amp; training script</a>
+    <br>CAI5735 · Module 14 paired exercise.
+  </footer>
+</main>
+
+<!-- ============ CHAT ============ -->
+<button id="chatFab" class="primary" aria-expanded="false" aria-controls="chatPanel">💬 Ask about this exhibit</button>
+<div id="chatPanel" role="dialog" aria-label="Exhibit chatbot">
+  <div class="chat-head"><b>Exhibit guide bot</b><button id="chatClose" aria-label="Close chat" style="padding:4px 10px">✕</button></div>
+  <div id="enableBox" class="enable">
+    <p style="margin:0 0 6px">This chatbot runs a small language model <b>entirely in your browser</b> using WebGPU. Nothing you type leaves your device. The first load downloads the model (several hundred MB) and caches it.</p>
+    <p id="gpuStatus" style="margin:6px 0"></p>
+    <label for="modelPick" style="font-weight:600">Model</label>
+    <select id="modelPick">
+      <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (balanced, ~0.9 GB)</option>
+      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (best answers, ~1.6 GB)</option>
+      <option value="SmolLM2-360M-Instruct-q4f16_1-MLC">SmolLM2 360M (fastest, ~0.4 GB)</option>
+    </select>
+    <button class="primary" id="enableChat" style="width:100%">Enable chat</button>
+    <div id="loadBox" style="display:none;margin-top:12px">
+      <progress id="loadBar" max="1" value="0"></progress>
+      <div id="loadText" style="font-size:12px;color:var(--text-muted);margin-top:4px"></div>
+    </div>
+  </div>
+  <div id="chatBody" class="chat-body" style="display:none"></div>
+  <form id="chatForm" class="chat-foot" style="display:none">
+    <input id="chatInput" placeholder="Ask about the data, model, or results…" autocomplete="off">
+    <button class="primary" id="sendBtn" type="submit">Send</button>
+  </form>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+// ------------------------------------------------------------------ config
+const REPO_URL = "https://github.com/edjavi120/clinic-wait-sim"; // <- change if your repo name differs
+document.getElementById("srcLink").href = REPO_URL;
+
+// ------------------------------------------------------------------ theme
+const themeBtn = document.getElementById("themeBtn");
+themeBtn.onclick = () => {
+  const cur = document.documentElement.dataset.theme ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+};
+
+// ------------------------------------------------------------------ helpers
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const fmtMin = m => m < 90 ? `${Math.round(m)} min` : `${(m / 60).toFixed(1)} hr`;
+function bigFmt(m) { return m < 90 ? [Math.round(m), "min"] : [(m / 60).toFixed(1), "hours"]; }
+const tip = $("tip");
+function showTip(evt, html) { tip.innerHTML = html; tip.style.display = "block"; tip.style.left = (evt.clientX + 14) + "px"; tip.style.top = (evt.clientY + 14) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+
+// ------------------------------------------------------------------ model
+let M = null;
+function predict(x) {                 // x = [doctors, queue_ahead, visit_minutes, walkins_per_hour]
+  let h = x.map((v, i) => (v - M.x_mean[i]) / M.x_std[i]);
+  for (let L = 0; L < M.weights.length; L++) {
+    const W = M.weights[L], b = M.biases[L], out = new Array(b.length);
+    for (let j = 0; j < b.length; j++) {
+      let s = b[j];
+      for (let i = 0; i < h.length; i++) s += h[i] * W[i][j];
+      out[j] = (L < M.weights.length - 1) ? Math.max(0, s) : s;   // ReLU hidden, identity output
+    }
+    h = out;
+  }
+  const logWait = h[0] * M.y_std + M.y_mean;
+  return {
+    wait: Math.max(0, Math.expm1(logWait)),
+    lo: Math.max(0, Math.expm1(logWait + M.log_band_p10_p90[0])),
+    hi: Math.max(0, Math.expm1(logWait + M.log_band_p10_p90[1])),
+  };
+}
+
+// ------------------------------------------------------------------ the real simulator (JS port of train_model.py)
+function randn() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+function simulateWait(doctors, queueAhead, visit, walkins) {
+  const sigma = Math.sqrt(Math.log(1 + 0.25)), mu = Math.log(visit) - sigma * sigma / 2;
+  const visitLen = () => Math.exp(mu + sigma * randn());
+  const busyP = queueAhead > 0 ? 1 : 0.7;
+  const freeAt = Array.from({ length: doctors }, () => Math.random() < busyP ? Math.random() * visit * 1.5 : 0);
+  const rate = walkins * M.urgent_share / 60;
+  const urgent = []; let t = 0;
+  while (rate > 0) { t += -Math.log(1 - Math.random()) / rate; if (t > 2000) break; urgent.push(t); }
+  let ui = 0, ahead = queueAhead;
+  while (true) {
+    let d = 0; for (let i = 1; i < doctors; i++) if (freeAt[i] < freeAt[d]) d = i;
+    const now = freeAt[d];
+    if (ui < urgent.length && urgent[ui] <= now) { ui++; freeAt[d] = now + visitLen(); }
+    else if (ahead > 0) { ahead--; freeAt[d] = now + visitLen(); }
+    else return now;
+  }
+}
+
+// ------------------------------------------------------------------ simulator UI
+const FEATS = ["doctors", "queue_ahead", "visit_minutes", "walkins_per_hour"];
+const fmtVal = { doctors: v => v, queue_ahead: v => v, visit_minutes: v => v + " min", walkins_per_hour: v => v + "/hr" };
+const getX = () => FEATS.map(f => +$(f).value);
+
+function renderClinic(x) {
+  const docRow = $("docRow"), qRow = $("queueRow");
+  docRow.innerHTML = ""; qRow.innerHTML = "";
+  for (let i = 0; i < x[0]; i++) { const d = document.createElement("span"); d.className = "doc"; d.textContent = "Dr"; docRow.appendChild(d); }
+  for (let i = 0; i < x[1]; i++) { const p = document.createElement("span"); p.className = "pt"; qRow.appendChild(p); }
+  const you = document.createElement("span"); you.className = "pt you"; qRow.appendChild(you);
+  const tag = document.createElement("span"); tag.className = "youtag"; tag.textContent = "← you"; qRow.appendChild(tag);
+}
+
+function update() {
+  const x = getX();
+  FEATS.forEach((f, i) => $("v_" + f).textContent = fmtVal[f](x[i]));
+  const p = predict(x);
+  const [n, u] = bigFmt(p.wait);
+  $("predBig").textContent = n; $("predUnit").textContent = u;
+  $("predRange").textContent = `Typical range: ${fmtMin(p.lo)} – ${fmtMin(p.hi)} (8 in 10 held-out validation cases fell within a band like this)`;
+  renderClinic(x);
+  renderDocChart(x);
+  $("simOut").innerHTML = "";
+}
+
+// histogram helper (used by "run simulator" and the mistake panel)
+function histogram(svg, values, pred, actual, opts = {}) {
+  svg.innerHTML = "";
+  const W = 460, H = opts.h || 200, m = { l: 36, r: 12, t: 14, b: 34 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const maxV = Math.max(...values, pred, actual ?? 0) * 1.05;
+  const nb = 24, bw = maxV / nb, counts = new Array(nb).fill(0);
+  values.forEach(v => counts[Math.min(nb - 1, Math.floor(v / bw))]++);
+  const cMax = Math.max(...counts);
+  const xs = v => m.l + (v / maxV) * (W - m.l - m.r), ys = c => H - m.b - (c / cMax) * (H - m.t - m.b);
+  for (let k = 0; k <= 4; k++) { const v = maxV * k / 4; el("text", { x: xs(v), y: H - m.b + 18, "text-anchor": k === 0 ? "start" : k === 4 ? "end" : "middle" }, svg).textContent = fmtMin(v); }
+  el("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--border)" }, svg);
+  counts.forEach((c, i) => {
+    if (!c) return;
+    const x0 = xs(i * bw) + 1, x1 = xs((i + 1) * bw) - 1;
+    const r = el("rect", { x: x0, y: ys(c), width: Math.max(1, x1 - x0), height: H - m.b - ys(c), rx: 3, fill: "var(--series-1-soft)" }, svg);
+    r.addEventListener("mousemove", e => showTip(e, `${fmtMin(i * bw)}–${fmtMin((i + 1) * bw)}: <b>${c}</b> runs`));
+    r.addEventListener("mouseleave", hideTip);
+  });
+  const vline = (v, color, label) => {
+    el("line", { x1: xs(v), x2: xs(v), y1: m.t, y2: H - m.b, stroke: color, "stroke-width": 2 }, svg);
+    el("text", { x: xs(v) + 4, y: m.t + 10, style: `fill:${color};font-weight:600` }, svg).textContent = label;
+  };
+  vline(pred, "var(--series-1)", "model");
+  if (actual != null) vline(actual, "var(--series-2)", "actual");
+}
+
+$("runSim").onclick = () => {
+  const x = getX();
+  const runs = Array.from({ length: 300 }, () => simulateWait(...x)).sort((a, b) => a - b);
+  const p = predict(x).wait;
+  const med = runs[150], within = runs.filter(r => r >= p * 0.72 && r <= p * 1.34).length;
+  const out = $("simOut"); out.innerHTML = "";
+  const svg = el("svg", { class: "chart", role: "img", "aria-label": "Histogram of 300 simulator runs" }, out);
+  histogram(svg, runs, p, null, { h: 180 });
+  const d = document.createElement("div"); d.className = "callout";
+  d.innerHTML = `The simulator's median was <b>${fmtMin(med)}</b>, and the model said <b>${fmtMin(p)}</b>. ` +
+    `But the same clinic gave anywhere from ${fmtMin(runs[15])} to ${fmtMin(runs[284])} (middle 90% of runs). ` +
+    `The model predicts the <i>typical</i> wait. Luck decides the rest.`;
+  out.appendChild(d);
+};
+
+// ------------------------------------------------------------------ discovery: wait vs doctors
+function renderDocChart(x) {
+  const svg = $("docChart"); svg.innerHTML = "";
+  const W = 900, H = 300, m = { l: 60, r: 20, t: 30, b: 44 };
+  const vals = [1, 2, 3, 4, 5, 6].map(d => predict([d, x[1], x[2], x[3]]).wait);
+  const maxV = Math.max(...vals) * 1.15;
+  const ys = v => H - m.b - (v / maxV) * (H - m.t - m.b);
+  for (let k = 0; k <= 4; k++) {
+    const v = maxV * k / 4, y = ys(v);
+    el("line", { x1: m.l, x2: W - m.r, y1: y, y2: y, class: "gridline" }, svg);
+    el("text", { x: m.l - 8, y: y + 4, "text-anchor": "end" }, svg).textContent = fmtMin(v);
+  }
+  const slot = (W - m.l - m.r) / 6, bw = Math.min(70, slot * 0.5);
+  vals.forEach((v, i) => {
+    const cx = m.l + slot * (i + 0.5), cur = (i + 1) === x[0];
+    const h = H - m.b - ys(v), y = ys(v);
+    // 4px rounded top, square at baseline
+    const r = Math.min(4, h);
+    const path = `M${cx - bw / 2},${H - m.b} V${y + r} Q${cx - bw / 2},${y} ${cx - bw / 2 + r},${y} H${cx + bw / 2 - r} Q${cx + bw / 2},${y} ${cx + bw / 2},${y + r} V${H - m.b} Z`;
+    const p = el("path", { d: path, fill: cur ? "var(--series-1)" : "var(--series-1-soft)" }, svg);
+    el("text", { x: cx, y: y - 8, "text-anchor": "middle", style: cur ? "font-weight:700;fill:var(--text-primary)" : "" }, svg).textContent = fmtMin(v);
+    el("text", { x: cx, y: H - m.b + 20, "text-anchor": "middle", style: cur ? "font-weight:700;fill:var(--text-primary)" : "" }, svg).textContent = `${i + 1} doctor${i ? "s" : ""}`;
+    const hit = el("rect", { x: cx - slot / 2, y: m.t, width: slot, height: H - m.t - m.b, fill: "transparent" }, svg);
+    hit.style.cursor = "pointer";
+    hit.addEventListener("mousemove", e => showTip(e, `<b>${i + 1} doctor${i ? "s" : ""}</b>: predicted ${fmtMin(v)}<br><span style="color:var(--text-muted)">click to set</span>`));
+    hit.addEventListener("mouseleave", hideTip);
+    hit.addEventListener("click", () => { $("doctors").value = i + 1; hideTip(); update(); });
+  });
+  el("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--border)" }, svg);
+  const save1 = vals[0] - vals[1], save5 = vals[4] - vals[5];
+  $("docCallout").innerHTML = `Going from 1 → 2 doctors saves about <b>${fmtMin(save1)}</b>. Going from 5 → 6 saves about <b>${fmtMin(Math.max(0, save5))}</b>. ` +
+    `<b>The first extra doctor matters most.</b> Once the doctors can keep up, adding more barely helps.`;
+}
+
+// ------------------------------------------------------------------ results
+function renderResults() {
+  const R = M.results;
+  $("resultsSub").textContent = `The model never saw these ${M.n.test.toLocaleString()} test patients during training or tuning. ` +
+    `Error = mean absolute error (MAE): on average, how many minutes off the prediction is. Lower is better.`;
+  const cards = [
+    ["Neural network", R.neural_net, true, `${M.hidden_layers.join("×")} hidden ReLU units`],
+    ["Baseline: always guess the median", R.median_baseline, false, `always says ${fmtMin(R.median_train_wait)}`],
+    ["Linear regression", R.linear_regression, false, "a straight-line model"],
+  ];
+  $("metrics").innerHTML = cards.map(([n, r, win, d]) =>
+    `<div class="card metric ${win ? "win" : ""}"><div class="name">${n}</div><div class="num">${r.mae} <small>min off on average</small></div><div style="font-size:13px;color:var(--text-muted)">${d} · R² ${r.r2}</div></div>`).join("");
+  $("resTable").innerHTML = `<tr><th>Model</th><th>MAE (min)</th><th>R²</th></tr>` +
+    cards.map(([n, r]) => `<tr><td>${n}</td><td>${r.mae}</td><td>${r.r2}</td></tr>`).join("");
+
+  // scatter, log-log
+  const svg = $("scatter"); svg.innerHTML = "";
+  const W = 460, H = 420, m = { l: 52, r: 14, t: 12, b: 46 };
+  const lo = 1, hi = Math.max(...M.test_points.map(p => Math.max(p[0], p[1]))) * 1.2;
+  const L = v => Math.log10(Math.max(lo, v));
+  const xs = v => m.l + (L(v) - L(lo)) / (L(hi) - L(lo)) * (W - m.l - m.r);
+  const ys = v => H - m.b - (L(v) - L(lo)) / (L(hi) - L(lo)) * (H - m.t - m.b);
+  [1, 3, 10, 30, 100, 300, 1000].filter(v => v <= hi).forEach(v => {
+    el("line", { x1: xs(v), x2: xs(v), y1: m.t, y2: H - m.b, class: "gridline" }, svg);
+    el("line", { x1: m.l, x2: W - m.r, y1: ys(v), y2: ys(v), class: "gridline" }, svg);
+    el("text", { x: xs(v), y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = v;
+    el("text", { x: m.l - 6, y: ys(v) + 4, "text-anchor": "end" }, svg).textContent = v;
+  });
+  el("text", { x: (W + m.l) / 2, y: H - 8, "text-anchor": "middle" }, svg).textContent = "Actual wait (min, log scale)";
+  el("text", { x: 14, y: (H - m.b) / 2, "text-anchor": "middle", transform: `rotate(-90 14 ${(H - m.b) / 2})` }, svg).textContent = "Predicted wait (min)";
+  el("line", { x1: xs(lo), y1: ys(lo), x2: xs(hi), y2: ys(hi), stroke: "var(--text-muted)", "stroke-width": 1.5, "stroke-dasharray": "4 4" }, svg);
+  const mk = M.mistake;
+  const g = el("g", {}, svg);
+  M.test_points.forEach(p => {
+    const isM = Math.abs(p[0] - mk.actual) < 0.05 && Math.abs(p[1] - mk.predicted) < 0.05;
+    if (isM) return;
+    const c = el("circle", { cx: xs(p[0]), cy: ys(p[1]), r: 3, fill: "var(--series-1)", "fill-opacity": .35 }, g);
+    c.addEventListener("mousemove", e => showTip(e, `${p[2]} dr · ${p[3]} ahead · ${p[4]}-min visits · ${p[5]}/hr<br>actual <b>${fmtMin(p[0])}</b>, predicted <b>${fmtMin(p[1])}</b>`));
+    c.addEventListener("mouseleave", hideTip);
+  });
+  const mc = el("circle", { cx: xs(mk.actual), cy: ys(mk.predicted), r: 7, fill: "var(--series-2)", stroke: "var(--surface-1)", "stroke-width": 2 }, svg);
+  mc.style.cursor = "pointer";
+  mc.addEventListener("mousemove", e => showTip(e, `<b>Biggest mistake</b><br>actual ${fmtMin(mk.actual)}, predicted ${fmtMin(mk.predicted)}`));
+  mc.addEventListener("mouseleave", hideTip);
+  mc.addEventListener("click", () => $("mistakeCard").scrollIntoView({ behavior: "smooth", block: "center" }));
+
+  // mistake panel
+  const i = mk.inputs;
+  $("mistakeText").innerHTML = `<p style="margin:0 0 8px">Clinic: <b>${i.doctors} doctor</b>, <b>${i.queue_ahead} people ahead</b>, ${i.visit_minutes}-min visits, ${i.walkins_per_hour} walk-ins/hr.
+    The model predicted <b>${fmtMin(mk.predicted)}</b>. This patient actually waited <b>${fmtMin(mk.actual)}</b>.</p>
+    <p style="margin:0 0 8px">Was the model wrong? We re-ran the simulator 500 times with the exact same clinic. The median wait was <b>${fmtMin(mk.rerun_median)}</b>,
+    almost exactly what the model said. This patient was just unlucky: long visits plus a string of urgent arrivals.</p>
+    <p style="margin:0"><b>What might have helped:</b> predicting a range instead of one number (we show one above the simulator), or giving the model information it doesn't have,
+    like how many urgent patients are already on the way.</p>`;
+  const runs = [];  // fresh 500 reruns of the same clinic, in-browser
+  for (let k = 0; k < 500; k++) runs.push(simulateWait(i.doctors, i.queue_ahead, i.visit_minutes, i.walkins_per_hour));
+  histogram($("mistakeChart"), runs, mk.predicted, mk.actual);
+}
+
+// ------------------------------------------------------------------ site guide (chatbot context)
+function buildGuide() {
+  const R = M.results, mk = M.mistake;
+  return `SITE PURPOSE
+"How long will you wait at the clinic?" is an interactive exhibit for a CAI5735 class exercise. Visitors adjust a simulated walk-in clinic and see how a small neural network predicts their wait. The question: how do staffing and queue size affect wait times?
+
+DATA
+- Source: synthetic. There is NO real patient or clinic data. The authors wrote a discrete-event queue simulation (train_model.py) and generated ${M.n.total.toLocaleString()} simulated arrivals.
+- How the simulation works: a non-urgent patient walks in. Some doctors are busy. A number of non-urgent patients are already waiting (first come, first served). New walk-ins keep arriving at random. ${Math.round(M.urgent_share * 100)}% of them are urgent and are seen before any waiting non-urgent patient. Visit lengths are random (lognormal, coefficient of variation 0.5).
+- Split: ${M.n.train.toLocaleString()} training, ${M.n.val.toLocaleString()} validation (used only to pick the network size), ${M.n.test.toLocaleString()} test (used once for the final results).
+- The median simulated wait is about ${fmtMin(R.median_train_wait)}.
+
+MODEL INPUTS (4) AND OUTPUT (1)
+1. Doctors on shift (1 to 6)
+2. Patients waiting ahead of you (0 to 15)
+3. Average visit length (5 to 25 minutes)
+4. New walk-ins per hour (2 to 15)
+Output: predicted wait in minutes for a newly arrived non-urgent patient.
+
+MODEL
+A neural network (scikit-learn MLPRegressor) with one hidden layer of ${M.hidden_layers.join("x")} ReLU units, trained on log(1 + wait) because waits are long-tailed. Inputs are standardized. The hidden-layer size was chosen on the validation set from 4, 8, 16, 32, and 16x16. The trained weights run directly in the visitor's browser.
+
+TEST RESULTS (${M.n.test.toLocaleString()} held-out test patients; MAE = mean absolute error in minutes, lower is better)
+- Neural network: MAE ${R.neural_net.mae} min, R-squared ${R.neural_net.r2}
+- Baseline (always predict the median training wait of ${R.median_train_wait} min): MAE ${R.median_baseline.mae} min, R-squared ${R.median_baseline.r2}
+- Linear regression: MAE ${R.linear_regression.mae} min, R-squared ${R.linear_regression.r2}
+The neural network's average error is about ${Math.round(R.median_baseline.mae / R.neural_net.mae)} times smaller than the median baseline's.
+
+BIGGEST MISTAKE
+A clinic with ${mk.inputs.doctors} doctor, ${mk.inputs.queue_ahead} patients ahead, ${mk.inputs.visit_minutes}-minute visits, and ${mk.inputs.walkins_per_hour} walk-ins per hour. Predicted ${fmtMin(mk.predicted)}, actual ${fmtMin(mk.actual)}. Re-running the simulator 500 times on that same clinic gave a median of ${fmtMin(mk.rerun_median)} (10th to 90th percentile: ${fmtMin(mk.rerun_p10)} to ${fmtMin(mk.rerun_p90)}). So the model was right about the typical wait, and that patient was unlucky. Predicting a range, or knowing how many urgent patients are coming, might have helped.
+
+KEY DISCOVERY
+The first extra doctor matters most. When one doctor can't keep up, adding a second cuts the wait sharply. Once the doctors can keep up, more doctors barely help.
+
+LIMITATIONS
+- Trained and tested only on synthetic data from one simulation. It has never been tested on real clinic data or on any other dataset, so its accuracy elsewhere is unknown and probably much worse.
+- It only knows the 4 inputs. Real clinics also have triage levels, appointments, no-shows, breaks, rooms, nurses, time of day, and more.
+- It should not be trusted outside the input ranges listed above.
+- It predicts a typical wait. Individual waits vary a lot because of luck.
+- Not for real medical or operational decisions.`;
+}
+
+// ------------------------------------------------------------------ chat (WebLLM)
+const SYSTEM_RULES = `You are the guide bot for a museum-style web exhibit. Answer ONLY using the SITE GUIDE below. Keep answers short (2 to 5 sentences), friendly, and plain.
+If the guide does not contain the answer, say clearly: "The site guide doesn't cover that." You may then mention a related limitation from the guide. Never invent numbers, sources, or results. Use the exact numbers from the guide.`;
+let engine = null, history = [];
+const panel = $("chatPanel"), fab = $("chatFab");
+fab.onclick = () => { const o = panel.classList.toggle("open"); fab.setAttribute("aria-expanded", o); };
+$("chatClose").onclick = () => { panel.classList.remove("open"); fab.setAttribute("aria-expanded", false); };
+
+async function checkGPU() {
+  const s = $("gpuStatus");
+  if (!("gpu" in navigator)) { s.innerHTML = "⚠️ This browser doesn't support WebGPU. Try recent Chrome or Edge on desktop. <b>The rest of the exhibit works without chat.</b>"; $("enableChat").disabled = true; return false; }
+  try {
+    const a = await navigator.gpu.requestAdapter();
+    if (!a) throw new Error("no adapter");
+    s.textContent = "✓ WebGPU is available on this device.";
+    return true;
+  } catch (e) { s.innerHTML = "⚠️ WebGPU is present but no GPU adapter was found. <b>The rest of the exhibit works without chat.</b>"; $("enableChat").disabled = true; return false; }
+}
+
+function addMsg(role, text) {
+  const d = document.createElement("div"); d.className = "msg " + role; d.textContent = text;
+  $("chatBody").appendChild(d); $("chatBody").scrollTop = 1e9; return d;
+}
+
+$("enableChat").onclick = async () => {
+  const btn = $("enableChat"); btn.disabled = true; $("modelPick").disabled = true;
+  $("loadBox").style.display = "block"; $("loadText").textContent = "Loading WebLLM library…";
+  try {
+    const webllm = await import("https://esm.run/@mlc-ai/web-llm@0.2.89");
+    engine = await webllm.CreateMLCEngine($("modelPick").value, {
+      initProgressCallback: r => { $("loadBar").value = r.progress || 0; $("loadText").textContent = r.text; },
+    });
+    $("enableBox").style.display = "none";
+    $("chatBody").style.display = "flex"; $("chatForm").style.display = "flex";
+    addMsg("sys", "Chat ready. Answers come only from the site guide (section 4).");
+    const sg = document.createElement("div"); sg.className = "suggest";
+    ["Where did your data come from?", "How did your model compare with the baseline?", "How well would this model work on a dataset you never tested?"]
+      .forEach(q => { const b = document.createElement("button"); b.textContent = q; b.onclick = () => { sg.remove(); ask(q); }; sg.appendChild(b); });
+    $("chatBody").appendChild(sg);
+    $("chatInput").focus();
+  } catch (e) {
+    console.error(e);
+    $("loadText").innerHTML = `<span style="color:var(--series-2)">Chat couldn't load (${String(e.message || e).slice(0, 140)}). The exhibit still works. Try a smaller model or another browser.</span>`;
+    btn.disabled = false; $("modelPick").disabled = false; btn.textContent = "Try again";
+  }
+};
+
+async function ask(q) {
+  if (!engine || !q.trim()) return;
+  addMsg("user", q);
+  const x = getX(), p = predict(x);
+  const live = `\n\nCURRENT VISITOR SETTINGS (live): ${x[0]} doctors, ${x[1]} patients ahead, ${x[2]}-minute visits, ${x[3]} walk-ins/hour. Model prediction: ${fmtMin(p.wait)} (typical range ${fmtMin(p.lo)} to ${fmtMin(p.hi)}).`;
+  const messages = [{ role: "system", content: SYSTEM_RULES + "\n\nSITE GUIDE:\n" + GUIDE + live }, ...history.slice(-6), { role: "user", content: q }];
+  const bot = addMsg("bot", "…"); $("sendBtn").disabled = true;
+  try {
+    const stream = await engine.chat.completions.create({ messages, stream: true, temperature: 0.2, max_tokens: 300 });
+    let txt = "";
+    for await (const chunk of stream) { txt += chunk.choices[0]?.delta?.content || ""; bot.textContent = txt; $("chatBody").scrollTop = 1e9; }
+    history.push({ role: "user", content: q }, { role: "assistant", content: txt });
+  } catch (e) { bot.textContent = "Sorry, something went wrong generating a reply."; console.error(e); }
+  $("sendBtn").disabled = false;
+}
+$("chatForm").onsubmit = e => { e.preventDefault(); const q = $("chatInput").value; $("chatInput").value = ""; ask(q); };
+
+// ------------------------------------------------------------------ boot
+let GUIDE = "";
+fetch("model.json").then(r => r.json()).then(data => {
+  M = data;
+  FEATS.forEach(f => $(f).addEventListener("input", update));
+  update();
+  renderResults();
+  GUIDE = buildGuide();
+  $("guideText").textContent = GUIDE;
+  checkGPU();
+}).catch(e => {
+  document.querySelector("main").insertAdjacentHTML("afterbegin", `<div class="card" style="border-color:var(--series-2)">Couldn't load model.json (${e}). If you opened this file directly, serve the folder instead (e.g. <code>python -m http.server</code>) or open the GitHub Pages link.</div>`);
+});
+</script>
+</body>
+</html>
