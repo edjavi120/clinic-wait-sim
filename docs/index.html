@@ -582,15 +582,28 @@ $("enableChat").onclick = async () => {
   }
 };
 
+
+// worked examples shown to the model before the visitor's question (few-shot prompting)
+function exampleTurns() {
+  const R = M.results, x = Math.round(R.median_baseline.mae / R.neural_net.mae);
+  return [
+    { role: "user", content: "Where did your data come from?" },
+    { role: "assistant", content: `Our data is synthetic. We wrote a simulation of a walk-in clinic queue (train_model.py) and used it to generate ${M.n.total.toLocaleString()} simulated patient arrivals. No real patient or clinic data was used.` },
+    { role: "user", content: "How did your model compare with the baseline?" },
+    { role: "assistant", content: `The neural network did much better. On ${M.n.test.toLocaleString()} held-out test patients, its predictions were off by ${R.neural_net.mae} minutes on average (MAE). The baseline, which always guesses the median wait of ${R.median_train_wait} minutes, was off by ${R.median_baseline.mae} minutes on average. Lower is better, so the network's error is about ${x} times smaller. A linear regression we also tried was off by ${R.linear_regression.mae} minutes.` },
+    { role: "user", content: "How well would this model work on a dataset you never tested?" },
+    { role: "assistant", content: "The site guide doesn't cover that, because the model was never tested on any other dataset. It was trained and tested only on synthetic data from one simulation, so its accuracy on real clinic data or another dataset is unknown and probably much worse. It also only knows 4 inputs and shouldn't be trusted outside their ranges." },
+  ];
+}
 async function ask(q) {
   if (!engine || !q.trim()) return;
   addMsg("user", q);
   const x = getX(), p = predict(x);
   const live = `\n\nCURRENT VISITOR SETTINGS (live): ${x[0]} doctors, ${x[1]} patients ahead, ${x[2]}-minute visits, ${x[3]} walk-ins/hour. Model prediction: ${fmtMin(p.wait)} (typical range ${fmtMin(p.lo)} to ${fmtMin(p.hi)}).`;
-  const messages = [{ role: "system", content: SYSTEM_RULES + "\n\nSITE GUIDE:\n" + GUIDE + live }, ...history.slice(-6), { role: "user", content: q }];
+  const messages = [{ role: "system", content: SYSTEM_RULES + "\n\nSITE GUIDE:\n" + GUIDE + live }, ...exampleTurns(), ...history.slice(-6), { role: "user", content: q }];
   const bot = addMsg("bot", "…"); $("sendBtn").disabled = true;
   try {
-    const stream = await engine.chat.completions.create({ messages, stream: true, temperature: 0.2, max_tokens: 300 });
+    const stream = await engine.chat.completions.create({ messages, stream: true, temperature: 0, max_tokens: 300 });
     let txt = "";
     for await (const chunk of stream) { txt += chunk.choices[0]?.delta?.content || ""; bot.textContent = txt; $("chatBody").scrollTop = 1e9; }
     history.push({ role: "user", content: q }, { role: "assistant", content: txt });
