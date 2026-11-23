@@ -236,8 +236,8 @@
     <p id="gpuStatus" style="margin:6px 0"></p>
     <label for="modelPick" style="font-weight:600">Model</label>
     <select id="modelPick">
-      <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (balanced, ~0.9 GB)</option>
-      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (best answers, ~1.6 GB)</option>
+      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (recommended, most accurate, ~1.6 GB)</option>
+      <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (smaller, ~0.9 GB)</option>
       <option value="SmolLM2-360M-Instruct-q4f16_1-MLC">SmolLM2 360M (fastest, ~0.4 GB)</option>
     </select>
     <button class="primary" id="enableChat" style="width:100%">Enable chat</button>
@@ -506,17 +506,26 @@ Output: predicted wait in minutes for a newly arrived non-urgent patient.
 MODEL
 A neural network (scikit-learn MLPRegressor) with one hidden layer of ${M.hidden_layers.join("x")} ReLU units, trained on log(1 + wait) because waits are long-tailed. Inputs are standardized. The hidden-layer size was chosen on the validation set from 4, 8, 16, 32, and 16x16. The trained weights run directly in the visitor's browser.
 
-TEST RESULTS (${M.n.test.toLocaleString()} held-out test patients; MAE = mean absolute error in minutes, lower is better)
-- Neural network: MAE ${R.neural_net.mae} min, R-squared ${R.neural_net.r2}
-- Baseline (always predict the median training wait of ${R.median_train_wait} min): MAE ${R.median_baseline.mae} min, R-squared ${R.median_baseline.r2}
-- Linear regression: MAE ${R.linear_regression.mae} min, R-squared ${R.linear_regression.r2}
-The neural network's average error is about ${Math.round(R.median_baseline.mae / R.neural_net.mae)} times smaller than the median baseline's.
+TEST RESULTS (${M.n.test.toLocaleString()} held-out test patients)
+MAE = mean absolute error = how many minutes off the prediction is, on average. LOWER IS BETTER.
+- Neural network (our model): MAE ${R.neural_net.mae} min, R-squared ${R.neural_net.r2}. This is the BEST of the three.
+- Baseline: the baseline is NOT a linear regression. The baseline always predicts the same number, the median training wait (${R.median_train_wait} min). Baseline MAE ${R.median_baseline.mae} min, R-squared ${R.median_baseline.r2}. This is the WORST of the three.
+- Linear regression (an extra comparison, not the baseline): MAE ${R.linear_regression.mae} min, R-squared ${R.linear_regression.r2}. Better than the baseline, worse than the neural network.
+Summary: the neural network (${R.neural_net.mae} min off on average) beat the baseline (${R.median_baseline.mae} min off). Its error is about ${Math.round(R.median_baseline.mae / R.neural_net.mae)} times smaller.
 
 BIGGEST MISTAKE
 A clinic with ${mk.inputs.doctors} doctor, ${mk.inputs.queue_ahead} patients ahead, ${mk.inputs.visit_minutes}-minute visits, and ${mk.inputs.walkins_per_hour} walk-ins per hour. Predicted ${fmtMin(mk.predicted)}, actual ${fmtMin(mk.actual)}. Re-running the simulator 500 times on that same clinic gave a median of ${fmtMin(mk.rerun_median)} (10th to 90th percentile: ${fmtMin(mk.rerun_p10)} to ${fmtMin(mk.rerun_p90)}). So the model was right about the typical wait, and that patient was unlucky. Predicting a range, or knowing how many urgent patients are coming, might have helped.
 
 KEY DISCOVERY
 The first extra doctor matters most. When one doctor can't keep up, adding a second cuts the wait sharply. Once the doctors can keep up, more doctors barely help.
+
+ANSWERS TO COMMON QUESTIONS
+Q: Where did your data come from?
+A: The data is synthetic. We wrote a computer simulation of a walk-in clinic queue (train_model.py) and used it to generate ${M.n.total.toLocaleString()} simulated patient arrivals. There is no real patient or clinic data.
+Q: How did your model compare with the baseline?
+A: The neural network was ${R.neural_net.mae} minutes off on average. The baseline, which always guesses the median wait of ${R.median_train_wait} minutes, was ${R.median_baseline.mae} minutes off. So the neural network was about ${Math.round(R.median_baseline.mae / R.neural_net.mae)} times more accurate. (A linear regression, tested as an extra comparison, was ${R.linear_regression.mae} minutes off.)
+Q: How well would this model work on a dataset you never tested?
+A: The site guide doesn't contain a test on any other dataset, so we don't know. The model was only trained and tested on synthetic data from one simulation, so on real clinic data or another dataset it would probably be much less accurate.
 
 LIMITATIONS
 - Trained and tested only on synthetic data from one simulation. It has never been tested on real clinic data or on any other dataset, so its accuracy elsewhere is unknown and probably much worse.
@@ -528,7 +537,7 @@ LIMITATIONS
 
 // ------------------------------------------------------------------ chat (WebLLM)
 const SYSTEM_RULES = `You are the guide bot for a museum-style web exhibit. Answer ONLY using the SITE GUIDE below. Keep answers short (2 to 5 sentences), friendly, and plain.
-If the guide does not contain the answer, say clearly: "The site guide doesn't cover that." You may then mention a related limitation from the guide. Never invent numbers, sources, or results. Use the exact numbers from the guide.`;
+If the guide does not contain the answer, say clearly: "The site guide doesn't cover that." You may then mention a related limitation from the guide. Never invent numbers, sources, or results. Use the exact numbers from the guide. For MAE, lower is better. If the guide has an answer under ANSWERS TO COMMON QUESTIONS, use it.`;
 let engine = null, history = [];
 const panel = $("chatPanel"), fab = $("chatFab");
 fab.onclick = () => { const o = panel.classList.toggle("open"); fab.setAttribute("aria-expanded", o); };
